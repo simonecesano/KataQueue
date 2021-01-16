@@ -75,6 +75,10 @@ sub before_server_start_hook {
     }
 }
 
+sub DESTROY {
+    my $self = shift;
+}
+
 sub check {
     my $self = shift;
     my $all = shift;
