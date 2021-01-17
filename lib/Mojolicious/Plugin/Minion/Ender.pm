@@ -94,9 +94,9 @@ sub DESTROY {
 
     for (grep { (kill 0 => $_) && ($$ != $_ ) } @{$self->workers}) {
 	if (kill HUP => $_) {
-	    $self->app->log->info(sprintf 'Successfully killed minion worker %d', $_);
+	    $self->app->log->info(sprintf 'Stopped minion worker %d', $_);
 	} else {
-	    $self->app->log->info(sprintf 'Error on killing minion worker %d: %s', $_, $@) if $self->config->{debug};
+	    $self->app->log->info(sprintf 'Error on stopping minion worker %d: %s', $_, $@) if $self->config->{debug};
 	}
     }
 }
