@@ -43,8 +43,6 @@ around 'new' => sub {
 
 	my @roles = keys %$roles;
 
-	# this doesn't work with +SomeRole
-	# needs fixing
 	for (@roles) {
 	    $job->opts({ _role_class($_) => $roles->{$_} });
 	}
