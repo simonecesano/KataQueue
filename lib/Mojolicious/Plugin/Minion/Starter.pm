@@ -1,132 +1,104 @@
-package Mojolicious::Plugin::Minion::Starter;
+package Mojolicious::Plugin::Minion::Ender;
 
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
-use Mojo::File qw/path/;
-use Mojo::Util qw/dumper/;
-use Mojo::IOLoop::Subprocess;
 
-use Proc::ProcessTable;
+my $app;
 
-has processes => sub { Proc::ProcessTable->new } ;
+has app => sub { Mojo::Server->new->build_app('Mojo::HelloWorld') };
 
-has table => sub { [] };
+has config => sub { {} };
 
-has app => has app => sub { Mojo::Server->new->build_app('Mojo::HelloWorld') };
-has config => sub { { } };
-
-use Time::HiRes qw/time/;
+has workers => sub { [] };
 
 sub register {
-    my ($self, $app, $config) = (@_);
+    my $self = shift;
+    my $app = shift;
+    my $config = shift;
+
     $self->app($app);
+    $self->config($config);
 
-    $self->start_reaper;
-
+    $app->log->info('Started ' . __PACKAGE__);
     $app->hook(before_server_start => $self->before_server_start_hook($config));
 }
 
-sub start_reaper {
-    my $self = shift;
-    my $config = shift;
-
-    my $tick = $config->{timeout} || 5;
-    $self->app->log->info(sprintf("Will reap zombie workers every %.2f seconds", $tick));
-    Mojo::IOLoop->recurring($tick => $self->reaper($config));
-}
-
-sub reaper {
-    my $self = shift;
-    my $config = shift;
-
-    my $reaper = sub {
-        my $start = time;
-        $self->check;
-        my $reaped = $self->reap;
-        if ($reaped && $config->{log}) {
-            $self->app->log->info(sprintf "Reaped %d zombies in %.4f seconds", $reaped, time - $start);
-        }
-    };
-    if ($config->{run}) { $reaper->() } else { $reaper }
-}
-
-sub before_server_start_hook {
+sub before_server_start_hook{
     my $self = shift;
     my $spawn = (shift() || {})->{spawn};
 
     $spawn //= 1; $spawn = $spawn <= 0 ? 1 : $spawn;
 
     sub {
-        my $ppid = $$;
-        my $server_pid = 0;
+	my ($server, $app) = @_;
 
-        $self->app->log->info(sprintf("Preparing to spawn %d processes", $spawn));
-        for (0..($spawn - 1)) {
-            my $subprocess = Mojo::IOLoop::Subprocess->new;
-            $subprocess->run(
-                             sub ($subprocess) { $self->app->minion->worker->run },
-                             sub ($subprocess, $err, @results) { $self->app->log->info($err) }
-                            );
-            $subprocess->on(spawn => sub ($subprocess) {
-                                $self->app->log->info(sprintf("Spawned Minion worker with pid %d and ppid %d", $subprocess->pid, $$));
-                            });
-            $subprocess->on(cleanup => sub ($subprocess) { $self->app->log->info("Process $$ is about to exit") });
-        }
-	$self->reaper({ log => 1, run => 1 });
+	if ($self->config->{debug}) {
+	    $self->app->log->info(sprintf "Server type is %s, process %d", ref $server, $$);
+	    $self->app->log->info(sprintf "Pid of parent of server process is %d", getppid());
+	}
+	# Mojo::Server::PSGI + plackup: parent is shell, server is plackup
+	# Mojo::Server::PSGI + starman: parent is starman
+	# Mojo::Server::Daemon morbo: parent is not shell
+
+	if (ref $server eq 'Mojo::Server::Prefork') {
+	    $server->on(spawn => sub  {
+			    my ($server, $pid) = @_;
+			    $self->spawn_worker if (scalar @{$self->workers} < $spawn);
+			});
+	    return;
+	}
+	if (ref $server eq 'Mojo::Server::Daemon') {
+	    $self->spawn_worker for (0..($spawn - 1));
+	    return;
+	}
+	$self->server_ok($server, $self->config->{debug});
+    }
+}
+
+sub server_ok {
+    my $self = shift;
+    my $server = ref $_[0] ? ref shift : shift;
+
+    my $verbose = shift;
+
+    if ($server eq 'Mojo::Server::Daemon') {
+	$self->app->log->info(sprintf "Ok: %s support server type %s", __PACKAGE__, $server);
+	return 1;
+    } elsif ($server eq 'Mojo::Server::Prefork') {
+	$self->app->log->info(sprintf "Warning: %s does not support server type %s", __PACKAGE__, $server);
+	return;
+    } else {
+	$self->app->log->info(sprintf "%s does not support server type %s", __PACKAGE__, $server);
+	return;
+    }
+}
+
+sub spawn_worker {
+    my $self = shift;
+
+    if (my $pid = fork) {
+	push @{$self->workers}, $pid;
+	# push @workers, $pid;
+	return;
+    } else {
+	if ($self->config->{debug}) {
+	    $self->app->log->info(sprintf "Starting minion worker %d with parent %d", $$, getppid());
+	} else {
+	    $self->app->log->info("Starting minion worker $$");
+	}
+	$self->app->minion->worker->run;
     }
 }
 
 sub DESTROY {
     my $self = shift;
-}
 
-sub check {
-    my $self = shift;
-    my $all = shift;
-    $self->table( [ map { $_ } grep { path($_->cmndline)->basename eq $0 } @{$self->processes->table} ]);
-}
-
-sub chain {
-    my $self = shift;
-    my %chain;
-    for (@{$self->table}) {
-        $chain{$_->ppid} = [] unless $chain{$_->ppid};
-        push @{$chain{$_->ppid}}, $_->pid;
+    for (grep { (kill 0 => $_) && ($$ != $_ ) } @{$self->workers}) {
+	if (kill HUP => $_) {
+	    $self->app->log->info(sprintf 'Stopped minion worker %d', $_);
+	} else {
+	    $self->app->log->info(sprintf 'Error on stopping minion worker %d: %s', $_, $@) if $self->config->{debug};
+	}
     }
-    return \%chain;
 }
 
-sub descendants {
-    my $self = shift;
-    my $pid = shift || $$;
-    my $desc = shift;
-
-    my $chain = $self->chain;
-
-    push @$desc, getppid if $pid == $$;
-    push @$desc, $pid if $pid == $$;
-
-    for (@{$chain->{$pid}}) {
-        push @$desc, $_;
-        $self->descendants($_, $desc);
-    }
-    return $desc;
-}
-
-sub zombies {
-    my $self = shift;
-    my @processes = @{$self->table};
-    my %legit;
-
-    @legit{@{$self->descendants}} = @{$self->descendants};
-
-    return [ map { $_->pid } grep { !$legit{$_->pid} } @processes ];
-}
-
-sub reap {
-    my $self = shift;
-    my @zombies = @{$self->zombies};
-
-    return kill 'HUP', @zombies;
-}
-
-1
+1;
