@@ -10,9 +10,6 @@ has config => sub { {} };
 
 has workers => sub { [] };
 
-# my @workers;
-
-
 sub register {
     my $self = shift;
     my $app = shift;
@@ -45,7 +42,7 @@ sub before_server_start_hook{
 	if (ref $server eq 'Mojo::Server::Prefork') {
 	    $server->on(spawn => sub  {
 			    my ($server, $pid) = @_;
-			    $self->spawn_worker for (0..($spawn - 1));
+			    $self->spawn_worker if (scalar @{$self->workers} < $spawn);
 			});
 	    return;
 	}
