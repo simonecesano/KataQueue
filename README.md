@@ -13,6 +13,8 @@ This is a test ground for Minion experiments
 
 ### Description
 
+Allows flexible creation of tasks with pluggable and configurable roles. 
+
 ### Synopsis
 
     use Minion::Task::Generator qw/task/;
@@ -32,9 +34,6 @@ This is a test ground for Minion experiments
                                    }));
 
 
-### Description
-
-Allows flexible creation of tasks with pluggable and configurable roles. 
 
 ### Methods
 
@@ -48,8 +47,56 @@ The "roles" option defines which roles will be applied to the job on execution; 
 
 The hashref values of the roles option get passed to the role on job execution. 
 
-## Minion::Job::Role::Alerter
+#### task
+
+    my $task = task(sub {}, { roles => {} })
+
+Shorthand for Minion::Task::Generator->new()
 
 ## Minion::Job::Role::Timeout
 
+### Description
+
+Role that stops job execution after a timeout (in seconds).
+
+### Synopsis
+
+    use Minion::Task::Generator qw/task/;
+
+    app->minion->add_task(some_task => task(sub { sleep rand() * 10 },
+                                   {
+                                    roles => {
+                                              '+Timeout' => { timeout => 6 }
+                                             }
+                                   }));
+
+#### Options
+
+- timeout: the number of seconds after which the job gets stopped
+
+## Minion::Job::Role::Alerter
+
+### Description
+
+Role that posts the job status to a URL
+
+### Synopsis
+
+    use Minion::Task::Generator qw/task/;
+
+    app->minion->add_task(some_task => task(sub { sleep rand() * 10 },
+                                   {
+                                    roles => {
+                                              '+Alerter' => { 'alert_on' => [qw/finished failed/ ], url => 'http://127.0.0.1:3000/status' },
+                                             }
+                                   }));
+#### Options
+
+- alert_on: the events that the job should alert on
+- url: the URL that the status gets posted to
+
 ## Minion::Job::RunScript
+
+### Description
+
+### Synopsis
