@@ -16,15 +16,14 @@ has root_process => 0;
 
 my @workers;
 
+my @servers_ok = qw/Mojo::Server::Prefork Mojo::Server::Daemon/;
+
 sub register {
     my $self = shift;
     $app = shift;
     my $config = shift;
     $self->app($app);
     $app->log->info('Started ' . __PACKAGE__);
-
-    $self->catch_sig;
-    
     $app->hook(before_server_start => $self->before_server_start_hook($config));
 }
 
@@ -32,84 +31,63 @@ sub before_server_start_hook{
     my $self = shift;
     my $spawn = (shift() || {})->{spawn};
 
-    $spawn //= 3; $spawn = $spawn <= 0 ? 1 : $spawn;
+    $spawn //= 1; $spawn = $spawn <= 0 ? 1 : $spawn;
 
     sub {
 	my ($server, $app) = @_;
+
+	$app->log->info(sprintf "Server type is %s, process %d", ref $server, $$);
+	$app->log->info(sprintf "Pid of parent of server process is %d", getppid());
 
 	# Mojo::Server::PSGI + plackup: parent is shell, server is plackup
 	# Mojo::Server::PSGI + starman: parent is starman
 	# Mojo::Server::Daemon morbo: parent is not shell
 
-	$app->log->info("server type is " . ref $server);
-	$app->log->info("server process is $$");
-	$app->log->info(sprintf "parent of server process is %d", getppid());
+	# local $SIG{TERM} = sub { print STDERR "got TERM\n" };
+
+	my $msg_done;
+	unless (grep { ref $server eq $_ } @servers_ok) {
+	    $app->log->info(sprintf "%s does not support server type %s", __PACKAGE__, ref $server) unless $msg_done++;
+	    return;
+	}
+
+	# local $SIG{HUP} = sub {
+	#     $app->log->info("got HUP in $$ " . getppid());
+	#     # exit 0
+	# };
 
 	$self->root_process($$);
-	$self->start_reaper;
 	$self->spawn_worker for (0..($spawn - 1));
     }
 }
 
-sub reaper {
-    my $self = shift;
-    my $config = shift;
-
-    my $reaper = sub {
-	$self->app->log->info(sprintf "root process is %d and it's %s", $self->root_process, (kill 0 => $self->root_process) ? 'alive' : 'dead');
-	$self->app->log->info(sprintf "these are worker processes %s", join ', ', @{$self->workers});
-    };
-    if ($config->{run}) { $reaper->() } else { $reaper }
-}
-
 sub catch_sig {
     my $self = shift;
-    defined $Config{sig_name} or die "No sigs?";
-    $self->app->log->info($Config{sig_name});
+    # defined $Config{sig_name} or die "No sigs?";
+    # $self->app->log->info($Config{sig_name});
 
-    # foreach $name (split(' ', $Config{sig_name})) {
-    # 	$signo{$name} = $i;
-    # 	$signame[$i] = $name;
-    # 	$i++;
+    # foreach my $name (grep { !/ZERO/ } split(' ', $Config{sig_name})) {
+    # 	local $SIG{$name} = sub { $self->app->log->info("caught $name in $$") };
     # }
-}
-
-sub start_reaper {
-    my $self = shift;
-    my $config = shift;
-
-    my $tick = $config->{timeout} || 5;
-    $self->app->log->info(sprintf("Will reap zombie workers every %.2f seconds", $tick));
-
-    Mojo::IOLoop->recurring($tick => $self->reaper($config));
 }
 
 sub spawn_worker {
     my $self = shift;
     if (my $pid = fork) {
 	push @{$self->workers}, $pid;
+	push @workers, $pid;
     } else {
 	$app->log->info("Starting minion worker $$ inside " . getppid());
 	$app->minion->worker->run;
     }
 }
 
-sub END {
-    print STDERR ('-' x 80) . "\n";
-}
-
 sub DESTROY {
     my $self = shift;
 
-    @workers = @{$self->workers};
-
-    $app->log->info(sprintf "Ending %d worker(s)", scalar @{$self->workers});
-
-    for (@{$self->workers}) {
+    for (grep { (kill 0 => $_) && ($$ != $_ ) } @{$self->workers}) {
 	if (kill HUP => $_) {
-	    $app->log->info(sprintf "Ending worker %d", $_);
 	} else {
-	    $app->log->info(sprintf "Could not end worker %d", $_);
 	}
     }
 }
