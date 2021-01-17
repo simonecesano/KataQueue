@@ -1,4 +1,4 @@
-package Mojolicious::Plugin::Minion::Ender;
+package Mojolicious::Plugin::Minion::Starter;
 
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
 
