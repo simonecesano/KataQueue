@@ -87,7 +87,7 @@ Role that posts the job status to a URL
     app->minion->add_task(some_task => task(sub { sleep rand() * 10 },
                                    {
                                     roles => {
-                                              '+Alerter' => { 'alert_on' => [qw/finished failed/ ], url => 'http://127.0.0.1:3000/status' },
+                                              '+Alerter' => { 'alert_on' => [qw/finish fail/ ], url => 'http://127.0.0.1:3000/status' },
                                              }
                                    }));
 #### Options
