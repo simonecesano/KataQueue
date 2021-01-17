@@ -5,7 +5,7 @@ use Mojo::Util qw/dumper/;
 
 sub alert {
     my $job = shift;
-    my $url = shift;
+    my $event = shift;
 
     my $package = __PACKAGE__;
 
@@ -17,16 +17,28 @@ sub alert {
       ||
       [] }) { $alert_ok{$_}++ }
 
-    $job->app->log->info((dumper $job->opts), (dumper ));
-    if ($alert_ok{$job->info->{state}}) {
-	return $job->app->ua->post('http://127.0.0.1:3000/status' => json => $job->info );
+    my $url = $job->opts && $job->opts->{url}
+	|| $job->opts->{$package} && $job->opts->{$package}->{url}
+	|| 'http://127.0.0.1:3000/status';
+
+    $job->app->log->info(join ': ', $event, $alert_ok{$event});
+
+    my $info = $job->info;
+
+    $info->{event} = $event;
+
+    if ($alert_ok{$event}) {
+	return $job->app->ua->post($url => json => $info );
     }
 }
 
-my @subs = qw/
-execute
+my @after_subs = qw/
 fail
 finish
+/;
+
+my @before_subs = qw/
+execute
 kill
 perform
 remove
@@ -36,10 +48,17 @@ start
 stop
 /;
 
-for (qw/finish fail/) {
-    after $_ => sub {
+for my $sub (@after_subs) {
+    after $sub => sub {
 	my $job = shift;
-	$job->alert();
+	$job->alert($sub);
+    };
+}
+
+for my $sub (@before_subs) {
+    before $sub => sub {
+	my $job = shift;
+	$job->alert($sub);
     };
 }
 
