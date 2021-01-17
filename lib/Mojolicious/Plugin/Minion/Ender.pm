@@ -1,29 +1,26 @@
 package Mojolicious::Plugin::Minion::Ender;
 
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
-use Mojo::File qw/path/;
-use Mojo::Util qw/dumper/;
-
-use Config;
-use Try::Tiny;
 
 my $app;
 
 has app => sub { Mojo::Server->new->build_app('Mojo::HelloWorld') };
 
+has config => sub { {} };
+
 has workers => sub { [] };
 
-has root_process => 0;
+# my @workers;
 
-my @workers;
-
-my @servers_ok = qw/Mojo::Server::Prefork Mojo::Server::Daemon/;
 
 sub register {
     my $self = shift;
-    $app = shift;
+    my $app = shift;
     my $config = shift;
+
     $self->app($app);
+    $self->config($config);
+
     $app->log->info('Started ' . __PACKAGE__);
     $app->hook(before_server_start => $self->before_server_start_hook($config));
 }
@@ -37,36 +34,61 @@ sub before_server_start_hook{
     sub {
 	my ($server, $app) = @_;
 
-	$app->log->info(sprintf "Server type is %s, process %d", ref $server, $$);
-	$app->log->info(sprintf "Pid of parent of server process is %d", getppid());
-
+	if ($self->config->{debug}) {
+	    $self->app->log->info(sprintf "Server type is %s, process %d", ref $server, $$);
+	    $self->app->log->info(sprintf "Pid of parent of server process is %d", getppid());
+	}
 	# Mojo::Server::PSGI + plackup: parent is shell, server is plackup
 	# Mojo::Server::PSGI + starman: parent is starman
 	# Mojo::Server::Daemon morbo: parent is not shell
 
-	my $msg_done;
-	if (ref $server eq 'Mojo::Server::Daemon') {
-	} elsif (ref $server eq 'Mojo::Server::Prefork') {
-	    $app->log->info(sprintf "Warning: %s does not support daemonized server type %s", __PACKAGE__, ref $server) unless $msg_done++;
-	} else {
-	    $app->log->info(sprintf "%s does not support server type %s", __PACKAGE__, ref $server) unless $msg_done++;
+	if (ref $server eq 'Mojo::Server::Prefork') {
+	    $server->on(spawn => sub  {
+			    my ($server, $pid) = @_;
+			    $self->spawn_worker for (0..($spawn - 1));
+			});
 	    return;
 	}
+	if (ref $server eq 'Mojo::Server::Daemon') {
+	    $self->spawn_worker for (0..($spawn - 1));
+	    return;
+	}
+	$self->server_ok($server, $self->config->{debug});
+    }
+}
 
-	$self->root_process($$);
-	$self->spawn_worker for (0..($spawn - 1));
+sub server_ok {
+    my $self = shift;
+    my $server = ref $_[0] ? ref shift : shift;
+
+    my $verbose = shift;
+
+    if ($server eq 'Mojo::Server::Daemon') {
+	$self->app->log->info(sprintf "Ok: %s support server type %s", __PACKAGE__, $server);
+	return 1;
+    } elsif ($server eq 'Mojo::Server::Prefork') {
+	$self->app->log->info(sprintf "Warning: %s does not support server type %s", __PACKAGE__, $server);
+	return;
+    } else {
+	$self->app->log->info(sprintf "%s does not support server type %s", __PACKAGE__, $server);
+	return;
     }
 }
 
 sub spawn_worker {
     my $self = shift;
+
     if (my $pid = fork) {
 	push @{$self->workers}, $pid;
-	push @workers, $pid;
+	# push @workers, $pid;
 	return;
     } else {
-	$app->log->info("Starting minion worker $$ inside " . getppid());
-	$app->minion->worker->run;
+	if ($self->config->{debug}) {
+	    $self->app->log->info(sprintf "Starting minion worker %d with parent %d", $$, getppid());
+	} else {
+	    $self->app->log->info("Starting minion worker $$");
+	}
+	$self->app->minion->worker->run;
     }
 }
 
@@ -75,7 +97,9 @@ sub DESTROY {
 
     for (grep { (kill 0 => $_) && ($$ != $_ ) } @{$self->workers}) {
 	if (kill HUP => $_) {
+	    $self->app->log->info(sprintf 'Successfully killed minion worker %d', $_);
 	} else {
+	    $self->app->log->info(sprintf 'Error on killing minion worker %d: %s', $_, $@) if $self->config->{debug};
 	}
     }
 }
