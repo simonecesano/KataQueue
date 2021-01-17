@@ -1,6 +1,6 @@
 # KataQueue
 
-This is a test ground for Minion experiments- README.md
+This is a test ground for Minion experiments
 
 - lib/Minion/Job/Generator.pm - a job generator for Minion queues 
 - lib/Minion/Job/Role/Alerter.pm - a role that alert on finish/fail
