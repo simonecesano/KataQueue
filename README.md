@@ -78,12 +78,16 @@ job will be run with the Minion::Job::Role::Timeout role. The role will be passe
 
 Options can also be overridden at the job level, by passing them after an argument named '-opts' like this:
 
+<<<<<<< HEAD
     app->minion->enqueue('some_task',  [
     				       'argument 1',
     				       'argument 2',
 				       -opts => { timeout => 12 }
 				       ],
 				       { priority => 1 });
+=======
+    app->minion->enqueue('some_task',  [ 'argument 1', 'argument 2', -opts => { timeout => 12 } ], { priority => 1 });
+>>>>>>> 3f3e9dd7776ae65eca2211c017500a068e7b76f6
 
 In this case the timeout option at job level will override the general one set when the task was created.
 
