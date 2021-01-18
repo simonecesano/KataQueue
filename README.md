@@ -28,7 +28,10 @@ Allows flexible creation of tasks with pluggable and configurable roles.
                                    },
                                    {
                                     roles => {
-                                              '+Alerter' => { 'alert_on' => [qw/finished failed/ ], url => 'http://127.0.0.1:3000/status' },
+                                              '+Alerter' => {
+					                      alert_on => [qw/finish fail/ ],
+							      url      => 'http://127.0.0.1:3000/status'
+							    },
                                               '+Timeout' => { timeout => 6 }
                                              }
                                    }));
@@ -52,6 +55,37 @@ The hashref values of the roles option get passed to the role on job execution.
     my $task = task(sub {}, { roles => {} })
 
 Shorthand for Minion::Task::Generator->new()
+
+### Passing options to the job
+
+Options can be passed
+
+- when the task gets created
+- when the job gets queued
+
+To pass options to the role, they are defined as part of the roles hashref, as the value to the key that defines the role.
+
+In this case:
+
+    app->minion->add_task(some_task => task(sub { return 1 },
+                                   {
+                                    roles => {
+                                              '+Timeout' => { timeout => 6 }
+                                             }
+                                   }));
+
+job will be run with the Minion::Job::Role::Timeout role. The role will be passed a timeout option of 6 seconds.
+
+Options can also be overridden at the job level, by passing them after an argument named '-opts' like this:
+
+    app->minion->enqueue('some_task',  [
+    				       'argument 1',
+    				       'argument 2',
+				       -opts => { timeout => 12 }
+				       ],
+				       { priority => 1 });
+
+In this case the timeout option at job level will override the general one set when the task was created.
 
 ## Minion::Job::Role::Timeout
 
