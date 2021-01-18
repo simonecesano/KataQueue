@@ -79,11 +79,11 @@ job will be run with the Minion::Job::Role::Timeout role. The role will be passe
 Options can also be overridden at the job level, by passing them after an argument named '-opts' like this:
 
     app->minion->enqueue('some_task',  [
-    				       'argument 1',
-    				       'argument 2',
-				       -opts => { timeout => 12 }
-				       ],
-				       { priority => 1 });
+                                       'argument 1',
+                                       'argument 2',
+                                       -opts => { timeout => 12 }
+                                       ],
+                                       { priority => 1 });
 
 In this case the timeout option at job level will override the general one set when the task was created.
 
@@ -134,3 +134,19 @@ Role that posts the job status to a URL
 ### Description
 
 ### Synopsis
+
+## Mojolicious::Plugin::Minion::Starter - start and stop minion workers together with the server
+
+### Description
+
+### Synopsis
+
+### Options
+
+## Mojolicious::Plugin::Server::MoreHooks - add custom hooks to servers
+
+### Description
+
+### Synopsis
+
+### Options
